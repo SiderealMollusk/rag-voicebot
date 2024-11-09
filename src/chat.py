@@ -8,6 +8,7 @@ from langchain.chat_models import ChatOpenAI
 from .config import OPENAI_API_KEY, CHAT_MODEL, TEMPERATURE
 from .database import get_qdrant_store
 from .audio import text_to_speech
+from .logger import log_app, log_user, log_bot, log_network
 
 def qa_ret(input_query: str) -> str:
     """Generate a response using RAG (Retrieval Augmented Generation).
@@ -19,7 +20,11 @@ def qa_ret(input_query: str) -> str:
         str: Generated response from the AI model
     """
     try:
+        log_app(f"Starting RAG chain for query")
+        log_user(f"Query: {input_query}")
+        
         # Get Qdrant store
+        log_app("Initializing Qdrant store")
         qdrant_store = get_qdrant_store()
         
         # Define the template for generating responses
@@ -33,19 +38,23 @@ def qa_ret(input_query: str) -> str:
         
         # Create chat prompt template
         prompt = ChatPromptTemplate.from_template(template)
+        log_app("Created chat prompt template")
 
         # Configure retriever
+        log_app("Configuring retriever with k=4")
         retriever = qdrant_store.as_retriever(
             search_type="similarity",
             search_kwargs={"k": 4}
         )
 
         # Set up parallel execution
+        log_app("Setting up parallel execution chain")
         setup_and_retrieval = RunnableParallel(
             {"context": retriever, "question": RunnablePassthrough()}
         )
 
         # Initialize the GPT model
+        log_network(f"Initializing ChatGPT model: {CHAT_MODEL}")
         model = ChatOpenAI(
             model_name=CHAT_MODEL,
             temperature=TEMPERATURE,
@@ -55,11 +64,17 @@ def qa_ret(input_query: str) -> str:
         # Chain the components
         output_parser = StrOutputParser()
         rag_chain = setup_and_retrieval | prompt | model | output_parser
+        log_app("RAG chain assembled")
 
         # Generate response
-        return rag_chain.invoke(input_query)
+        log_network("Sending request to OpenAI")
+        response = rag_chain.invoke(input_query)
+        log_bot(f"Generated response: {response[:100]}...")  # Log first 100 chars
+        return response
 
     except Exception as ex:
+        error_msg = f"Error in qa_ret: {str(ex)}"
+        log_app(error_msg, "error")
         return f"Error: {str(ex)}"
 
 def add_to_chat_history(user_input: str, bot_response: str, file_meta: Dict[str, Any]) -> None:
@@ -70,7 +85,10 @@ def add_to_chat_history(user_input: str, bot_response: str, file_meta: Dict[str,
         bot_response: Assistant's response
         file_meta: Metadata about the file being discussed
     """
+    log_app("Adding new interaction to chat history")
+    
     # Convert bot's response to audio
+    log_app("Converting response to audio")
     audio_response = text_to_speech(bot_response)
     
     # Add to chat history
@@ -80,9 +98,12 @@ def add_to_chat_history(user_input: str, bot_response: str, file_meta: Dict[str,
         "bot_audio": audio_response,
         "file_meta": file_meta
     })
+    log_app("Chat history updated successfully")
 
 def display_chat_history() -> None:
     """Display the chat history with user inputs and assistant responses."""
+    log_app(f"Displaying chat history with {len(st.session_state['chat_history'])} messages")
+    
     for chat in st.session_state["chat_history"]:
         # Display user input
         with st.chat_message("user"):
@@ -98,8 +119,12 @@ def display_chat_history() -> None:
 
 def initialize_chat_state() -> None:
     """Initialize chat-related session state variables."""
+    log_app("Initializing chat state")
+    
     if "chat_history" not in st.session_state:
         st.session_state["chat_history"] = []
+        log_app("Created new chat history")
     
     if "recording_key" not in st.session_state:
         st.session_state["recording_key"] = 0
+        log_app("Initialized recording key")
